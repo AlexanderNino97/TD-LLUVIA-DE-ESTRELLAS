@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TG-01: Lluvia de Estrellas</title>
+    <style>
+        /* Estilos básicos para centrar el juego en la pantalla y poner el fondo negro */
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        canvas {
+            border: 2px solid #444;
+            border-radius: 8px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- 1. Cargamos el motor Kaboom.js -->
+    <script src="https://unpkg.com/kaboom@3000.1.17/dist/kaboom.js"></script>
+
+    <!-- 2. Cargamos nuestro juego -->
+    <script src="game.js"></script>
+</body>
+
+</html>
