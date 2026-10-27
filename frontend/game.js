@@ -1,10 +1,27 @@
-// Inicializar Kaboom a pantalla completa
+// 1. EXTRAER PARÁMETROS DE INTEGRACIÓN DE LA URL
+const urlParams = new URLSearchParams(window.location.search);
+const sessionId = urlParams.get("sessionId");
+const launchToken = urlParams.get("token");
+const apiBase = urlParams.get("apiBase") || "http://localhost:3000/api/v1";
+const targetOrigin = urlParams.get("targetOrigin") || window.location.origin;
+
+// 2. REGISTRO DE INCIDENCIAS
+const incidents = [];
+
+window.addEventListener("blur", () => {
+    incidents.push({ type: "loss_of_focus", timestampMs: performance.now() });
+});
+
+window.addEventListener("error", (e) => {
+    incidents.push({ type: "script_error", message: e.message, timestampMs: performance.now() });
+});
+
+// 3. INICIALIZAR KABOOM LOCAL
 kaboom({
     width: window.innerWidth,
     height: window.innerHeight,
 });
 
-// 1. CARGA DE RECURSOS (Assets)
 loadSprite("background", "assets/background.gif");
 loadSprite("kud", "assets/kud.png");
 loadSprite("star", "assets/star.png");
@@ -12,17 +29,24 @@ loadSprite("moon", "assets/moon.png");
 loadSound("hit", "assets/pop.mp3");
 loadSound("bgm", "assets/musica.mp3");
 
-// Estructura de datos para registro metodológico
-let sessionData = {
+// Estructura de sesión del contrato v1
+const sessionData = {
+    contractVersion: "1",
     taskId: "TG-01",
+    configVersion: 1,
     state: "interrupted",
-    events: []
+    device: {
+        viewport: `${window.innerWidth}x${window.innerHeight}`,
+        touch: 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    },
+    events: [],
+    incidents: incidents
 };
 
 let trialCounter = 1;
 let backgroundMusic;
 
-// 2. ESCENA DE INSTRUCCIONES
+// ESCENA INTRO
 scene("intro", () => {
     add([
         sprite("background", { width: width(), height: height() }),
@@ -57,12 +81,16 @@ scene("intro", () => {
     ]);
 
     onClick(() => {
-        backgroundMusic = play("bgm", { loop: true, volume: 0.3 });
+        try {
+            backgroundMusic = play("bgm", { loop: true, volume: 0.3 });
+        } catch (e) {
+            incidents.push({ type: "audio_play_failed", message: e.message, timestampMs: performance.now() });
+        }
         go("game");
     });
 });
 
-// 3. ESCENA PRINCIPAL (Go/No-Go)
+// ESCENA PRINCIPAL
 scene("game", () => {
     add([
         sprite("background", { width: width(), height: height() }),
@@ -70,53 +98,44 @@ scene("game", () => {
         anchor("center")
     ]);
 
-    const startTime = time();
+    const startTimeMs = performance.now();
     let isGameOver = false;
 
     const getSegment = () => {
-        const elapsed = time() - startTime;
-        if (elapsed < 40) return 1;
-        if (elapsed < 80) return 2;
+        const elapsedSec = (performance.now() - startTimeMs) / 1000;
+        if (elapsedSec < 40) return 1;
+        if (elapsedSec < 80) return 2;
         return 3;
     };
 
-    // SISTEMA DE CARRILES Y VERIFICACIÓN 2D
     const NUM_LANES = 6;
     const LANE_WIDTH = width() / NUM_LANES;
 
     const getValidPosition = () => {
-        const minDistance2D = 180; // Distancia mínima en píxeles para evitar cualquier solapamiento
+        const minDistance2D = 180;
         let attempts = 0;
 
         while (attempts < 30) {
-            // Selecciona un carril al azar asegurando margen dentro de la pantalla
             const lane = randi(0, NUM_LANES);
             const laneX = (lane * LANE_WIDTH) + (LANE_WIDTH / 2);
             const spawnY = -60;
-
             let isValid = true;
 
-            // Mide la distancia euclidiana en tiempo real contra TODOS los objetos activos
             for (const item of get("stimulus")) {
                 const dx = item.pos.x - laneX;
                 const dy = item.pos.y - spawnY;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-
-                if (distance < minDistance2D) {
+                if (Math.sqrt(dx * dx + dy * dy) < minDistance2D) {
                     isValid = false;
                     break;
                 }
             }
 
-            if (isValid) {
-                return laneX;
-            }
+            if (isValid) return laneX;
             attempts++;
         }
-        return null; // Si no hay espacio seguro, omite la generación en este ciclo
+        return null;
     };
 
-    // GENERADOR DE ESTÍMULOS
     const spawnStimulus = () => {
         if (isGameOver) return;
 
@@ -125,58 +144,42 @@ scene("game", () => {
         if (spawnX !== null) {
             const isStar = chance(0.7);
             const stimType = isStar ? "star" : "moon";
-
-            // Variación de tamaño acotada en píxeles
             const baseSize = rand(75, 105);
 
             const stimulus = add([
                 sprite(stimType, { width: baseSize, height: baseSize }),
                 pos(spawnX, -60),
                 anchor("center"),
-                move(DOWN, 210), // Velocidad constante para mantener distancias paralelas
+                move(DOWN, 210),
                 area(),
                 "stimulus",
                 {
-                    trial_id: trialCounter++,
+                    trial: trialCounter++,
                     stimulus_type: stimType,
-                    timestamp_spawn: Date.now(),
+                    presentedAtMs: null,
                     segment: getSegment(),
-                    interacted: false
+                    interacted: false,
+                    isVisible: false
                 }
             ]);
 
-            onClick(() => {
-                if (stimulus.isHovering() && !stimulus.interacted) {
-                    stimulus.interacted = true;
-                    const reactionTime = Date.now() - stimulus.timestamp_spawn;
-
-                    let result = isStar ? "hit" : "false_alarm";
-                    if (result === "hit") play("hit", { volume: 0.5 });
-
-                    sessionData.events.push({
-                        trial_id: stimulus.trial_id,
-                        stimulus_type: stimulus.stimulus_type,
-                        timestamp_spawn: stimulus.timestamp_spawn,
-                        timestamp_response: Date.now(),
-                        reaction_time_ms: reactionTime,
-                        result: result,
-                        segment: stimulus.segment
-                    });
-
-                    destroy(stimulus);
-                }
-            });
-
+            // Detección exacta de visibilidad (y >= 0) para timestamp preciso
             stimulus.onUpdate(() => {
+                if (!stimulus.isVisible && stimulus.pos.y >= 0) {
+                    stimulus.isVisible = true;
+                    stimulus.presentedAtMs = performance.now();
+                }
+
+                // Omisión o Rechazo correcto al salir de pantalla
                 if (stimulus.pos.y > height() + 80 && !stimulus.interacted) {
-                    let result = isStar ? "miss" : "correct_rejection";
+                    stimulus.interacted = true;
+                    const result = isStar ? "miss" : "correct_rejection";
 
                     sessionData.events.push({
-                        trial_id: stimulus.trial_id,
-                        stimulus_type: stimulus.stimulus_type,
-                        timestamp_spawn: stimulus.timestamp_spawn,
-                        timestamp_response: null,
-                        reaction_time_ms: null,
+                        trial: stimulus.trial,
+                        stimulus: stimulus.stimulus_type,
+                        presentedAtMs: stimulus.presentedAtMs,
+                        respondedAtMs: null,
                         result: result,
                         segment: stimulus.segment
                     });
@@ -189,17 +192,58 @@ scene("game", () => {
         wait(rand(1.1, 1.8), spawnStimulus);
     };
 
+    // Manejador único global de clics para evitar fugas de memoria
+    onClick("stimulus", (stimulus) => {
+        if (!stimulus.interacted && stimulus.isVisible) {
+            stimulus.interacted = true;
+            const respondedAtMs = performance.now();
+            const isStar = stimulus.stimulus_type === "star";
+            const result = isStar ? "hit" : "false_alarm";
+
+            if (result === "hit") play("hit", { volume: 0.5 });
+
+            sessionData.events.push({
+                trial: stimulus.trial,
+                stimulus: stimulus.stimulus_type,
+                presentedAtMs: stimulus.presentedAtMs,
+                respondedAtMs: respondedAtMs,
+                result: result,
+                segment: stimulus.segment
+            });
+
+            destroy(stimulus);
+        }
+    });
+
     spawnStimulus();
 
-    wait(120, () => {
+    // Finalización a los 120 segundos
+    wait(20, () => {
         isGameOver = true;
         sessionData.state = "completed";
         if (backgroundMusic) backgroundMusic.paused = true;
+
+        // Resolver estímulos pendientes en pantalla para no perder datos
+        get("stimulus").forEach((stimulus) => {
+            if (!stimulus.interacted && stimulus.isVisible) {
+                const isStar = stimulus.stimulus_type === "star";
+                sessionData.events.push({
+                    trial: stimulus.trial,
+                    stimulus: stimulus.stimulus_type,
+                    presentedAtMs: stimulus.presentedAtMs,
+                    respondedAtMs: null,
+                    result: isStar ? "miss" : "correct_rejection",
+                    segment: stimulus.segment
+                });
+            }
+            destroy(stimulus);
+        });
+
         go("gameOver");
     });
 });
 
-// 4. ESCENA FINAL
+// ESCENA FINAL Y ENVÍO DE DATOS
 scene("gameOver", () => {
     add([
         sprite("background", { width: width(), height: height() }),
@@ -213,8 +257,24 @@ scene("gameOver", () => {
         anchor("center")
     ]);
 
-    window.parent.postMessage({ type: "GAME_OVER", payload: sessionData }, "*");
+    // Enviar resultados directamente al Backend
+    if (sessionId && launchToken) {
+        fetch(`${apiBase}/task-sessions/${sessionId}/results`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${launchToken}`
+            },
+            body: JSON.stringify(sessionData)
+        }).catch((err) => {
+            incidents.push({ type: "network_submit_error", message: err.message, timestampMs: performance.now() });
+            localStorage.setItem(`pending_session_${sessionId}`, JSON.stringify(sessionData));
+        });
+    }
+
+    // Notificar a la aplicación ventana padre de forma segura
+    window.parent.postMessage({ type: "GAME_OVER", payload: sessionData }, targetOrigin);
 });
 
-// Iniciar
+// INICIAR
 go("intro");
