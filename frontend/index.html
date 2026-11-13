@@ -1,36 +1,129 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TG-01: Lluvia de Estrellas</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&display=swap" rel="stylesheet">
     <style>
-        /* Estilos básicos para centrar el juego en la pantalla y poner el fondo negro */
-        body {
-            margin: 0;
-            overflow: hidden;
-            background-color: #111;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
+        html, body {
+            margin: 0; height: 100%; overflow: hidden;
+            background: #14264d;
+            display: grid; place-items: center;
+            font-family: 'Fredoka', 'Trebuchet MS', system-ui, sans-serif;
+            -webkit-user-select: none; user-select: none;
+            -webkit-tap-highlight-color: transparent;
         }
+        /* Escenario fijo 16:9 (base 1920x1080). Todas las posiciones están en % de esa base. */
+        #stage {
+            position: relative;
+            width: min(100vw, 177.78vh); aspect-ratio: 16 / 9;
+            overflow: hidden; container-type: inline-size;
+            background: #14264d;
+            touch-action: none;
+        }
+        .layer { position: absolute; display: block; pointer-events: none; }
+        .full  { inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .hidden { display: none !important; }
+        .fade { transition: opacity .35s ease; }
+        .off  { opacity: 0; }
 
-        canvas {
-            border: 2px solid #444;
-            border-radius: 8px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+        /* Kud: un contenedor que se ubica según el escenario */
+        #kud { aspect-ratio: 1 / 1; }
+        #kud img, #kud video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: transparent; }
+        #kud.lab    { left: 34.01%; top: 37.04%; width: 31.25%; }
+        #kud.space  { left: 80%;    top: 50%;    width: 18.75%; }
+        #shipFront  { left: 76.745%; top: 69.861%; width: 23.255%; }
+
+        /* Zona de actividad (x 440–1510, y 330–950 en la base 1920x1080): aquí vive el lienzo de Kaboom */
+        #zone { position: absolute; left: 22.917%; top: 30.556%; width: 55.729%; height: 57.407%; }
+        #zone canvas { width: 100% !important; height: 100% !important; display: block; outline: none; }
+
+        /* Globo del laboratorio (el dibujo está en el fondo; aquí solo va el texto) */
+        #labText {
+            position: absolute; left: 58.6%; top: 27.9%; width: 17.3%; height: 18.2%;
+            display: flex; align-items: center; justify-content: center; text-align: center;
+            color: #1d2b52; font-weight: 500; font-size: 1.45cqw; line-height: 1.25;
         }
+        /* Globo del escenario espacial (junto a Kud, fuera de la zona de actividad) */
+        #spaceBubble {
+            position: absolute; left: 78.9%; top: 27.6%; width: 19.6%; min-height: 15%;
+            box-sizing: border-box; padding: 1.1cqw 1.2cqw;
+            background: #fffaf0; border: .28cqw solid #1d2b52; border-radius: 1.6cqw;
+            box-shadow: .5cqw .6cqw 0 rgba(107, 61, 30, .18);
+            display: flex; align-items: center; justify-content: center; text-align: center;
+            color: #1d2b52; font-weight: 500; font-size: 1.3cqw; line-height: 1.25;
+        }
+        #spaceBubble::after {
+            content: ""; position: absolute; left: 34%; bottom: -1.5cqw;
+            width: 2cqw; height: 2cqw; background: #fffaf0;
+            border-right: .28cqw solid #1d2b52; border-bottom: .28cqw solid #1d2b52;
+            transform: skewX(18deg) rotate(45deg);
+        }
+        .ico { height: 1.5em; vertical-align: -0.38em; margin: 0 .1em; }
+
+        /* Botones (interfaz de la actividad, en la franja inferior reservada) */
+        #buttons { position: absolute; left: 0; right: 0; bottom: 3.2%; display: flex; gap: 1.4cqw; justify-content: center; pointer-events: auto; }
+        .btn {
+            font: 600 1.45cqw 'Fredoka', 'Trebuchet MS', sans-serif; color: #fffaf0;
+            background: #ff9a4c; border: .25cqw solid #1d2b52; border-radius: 2.2cqw;
+            padding: .7cqw 2.2cqw; cursor: pointer; box-shadow: 0 .35cqw 0 #1d2b52;
+        }
+        .btn.alt { background: #2ec4b6; }
+        .btn:active { transform: translateY(.25cqw); box-shadow: 0 .1cqw 0 #1d2b52; }
+
+        /* Progreso de la misión (franja superior izquierda reservada). Sin puntaje visible. */
+        #progress { position: absolute; left: 1.6%; top: 2.4%; width: 20%; height: 2.4%;
+            background: rgba(20, 38, 77, .75); border: .22cqw solid #1d2b52; border-radius: 2cqw; overflow: hidden; }
+        #progressFill { height: 100%; width: 0%; background: linear-gradient(90deg, #2ec4b6, #a8e6dc); }
+
+        #countdown { position: absolute; left: 22.917%; top: 30.556%; width: 55.729%; height: 57.407%;
+            display: flex; align-items: center; justify-content: center;
+            font: 600 9cqw 'Fredoka', sans-serif; color: #fffaf0; -webkit-text-stroke: .35cqw #1d2b52; }
+
+        #transition { z-index: 20; background: #14264d; }
+        #loading { position: absolute; inset: 0; display: grid; place-items: center; color: #fffaf0; font-size: 1.6cqw; z-index: 30; background: #14264d; }
+        #debug { position: absolute; left: 0; bottom: 0; max-height: 40%; overflow: auto; font: 10px monospace; background: #fff; color: #000; z-index: 40; white-space: pre; }
     </style>
 </head>
 
 <body>
-    <!-- 1. Cargamos el motor Kaboom.js -->
-    <script src="https://unpkg.com/kaboom@3000.1.17/dist/kaboom.js"></script>
+    <div id="stage">
+        <!-- Fondos (escenarios 16:9) -->
+        <img id="bgLab"   class="layer full" src="assets/escenario-laboratorio.webp" alt="">
+        <img id="bgSpace" class="layer full hidden" src="assets/escenario-espacio.webp" alt="">
 
-    <!-- 2. Cargamos nuestro juego -->
+        <!-- Kud: imagen quieta + animación al hablar (WebM con transparencia; WebP animado en Safari) -->
+        <div id="kud" class="layer lab">
+            <img id="kudIdle" src="assets/kud-quieto.png" alt="Kud">
+            <video id="kudTalk" class="hidden" muted loop playsinline preload="auto">
+                <source src="assets/kud-hablando.webm" type="video/webm">
+            </video>
+            <img id="kudTalkImg" class="hidden" alt="">
+        </div>
+        <img id="shipFront" class="layer hidden" src="assets/nave-frente.png" alt="">
+
+        <!-- Zona de actividad: lienzo de Kaboom (solo estrellas y lunas) -->
+        <div id="zone" class="hidden"><canvas id="game" tabindex="-1"></canvas></div>
+
+        <div id="labText" class="layer fade"></div>
+        <div id="spaceBubble" class="layer fade off hidden"></div>
+        <div id="progress" class="layer hidden"><div id="progressFill"></div></div>
+        <div id="countdown" class="layer hidden"></div>
+        <div id="buttons"></div>
+
+        <!-- Transición laboratorio → espacio -->
+        <video id="transition" class="layer full hidden" muted playsinline preload="auto">
+            <source src="assets/transicion-lab-a-espacio.webm" type="video/webm">
+            <source src="assets/transicion-lab-a-espacio.mp4" type="video/mp4">
+        </video>
+
+        <div id="loading">Cargando…</div>
+    </div>
+
+    <!-- Motor Kaboom.js (copia local, sin depender de CDN) -->
+    <script src="libs/kaboom.js"></script>
     <script src="game.js"></script>
 </body>
-
 </html>

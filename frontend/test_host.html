@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TG-01 · Host de prueba (iframe + postMessage)</title>
+    <style>
+        body { margin: 0; font-family: system-ui, sans-serif; background: #f4f1ea; color: #1d2b52; display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); height: 100vh; }
+        iframe { width: 100%; height: 100%; border: 0; background: #14264d; }
+        aside { overflow: auto; padding: 16px; border-left: 2px solid #1d2b52; }
+        h2 { margin: 0 0 8px; font-size: 18px; } h3 { margin: 16px 0 6px; font-size: 15px; }
+        table { border-collapse: collapse; width: 100%; font-size: 13px; }
+        td, th { border-bottom: 1px solid #d9d2c3; padding: 4px 6px; text-align: right; } td:first-child, th:first-child { text-align: left; }
+        .state { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #2ec4b6; color: #fff; font-weight: 600; }
+        .state.interrupted { background: #e85d75; }
+        pre { font-size: 11px; background: #fff; padding: 8px; max-height: 320px; overflow: auto; }
+        button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 2px solid #1d2b52; background: #ff9a4c; color: #fff; cursor: pointer; }
+        .muted { color: #6b6b6b; font-size: 13px; }
+    </style>
+</head>
+<body>
+    <iframe id="game" allow="autoplay"></iframe>
+    <aside>
+        <h2>Datos recibidos</h2>
+        <p class="muted" id="status">Esperando el mensaje GAME_OVER o GAME_INTERRUPTED del juego…</p>
+        <div id="out"></div>
+    </aside>
+<script>
+    // Parámetros del juego: los de esta página se reenvían al iframe (p. ej. ?duracion=30&sinTransicion=1)
+    const params = new URLSearchParams(location.search);
+    if (!params.get("sessionId")) params.set("sessionId", "SESION-TEST-01");
+    params.set("targetOrigin", location.origin);
+    document.getElementById("game").src = "index.html?" + params.toString();
+
+    const labels = {
+        validTargets: "Estrellas válidas", validDistractors: "Lunas válidas", hits: "Aciertos", omissions: "Omisiones",
+        commissions: "Comisiones", correctRejections: "Rechazos correctos", precisionPct: "Precisión (%)",
+        omissionRatePct: "Tasa de omisión (%)", commissionRatePct: "Tasa de comisión (%)", rtMedianMs: "TR mediana (ms)",
+        rtMeanMs: "TR media (ms)", rtSdMs: "TR desv. estándar (ms)", rtCvPct: "TR coef. variación (%)", rtValidN: "TR válidos (n)",
+        anticipatoryHits: "Aciertos anticipatorios", emptyResponses: "Toques sin estímulo", invalidTrials: "Ensayos inválidos", status: "Estado del cálculo"
+    };
+    window.addEventListener("message", (ev) => {
+        if (ev.origin !== location.origin || !ev.data || !ev.data.type) return;
+        const d = ev.data.payload; if (!d) return;
+        document.getElementById("status").innerHTML = `Mensaje <b>${ev.data.type}</b> · estado <span class="state ${d.state}">${d.state}</span> · fase alcanzada: ${d.phaseReached}`;
+        const s = d.summary || { overall: {}, bySegment: [] };
+        const cols = [["Total", s.overall]].concat((s.bySegment || []).map((b) => [`Seg. ${b.segment}`, b]));
+        let html = "<h3>TG-01 · Indicadores</h3><table><tr><th></th>" + cols.map((c) => `<th>${c[0]}</th>`).join("") + "</tr>";
+        for (const k in labels) html += `<tr><td>${labels[k]}</td>` + cols.map((c) => `<td>${c[1][k] ?? "—"}</td>`).join("") + "</tr>";
+        html += "</table>";
+        html += `<h3>Práctica guiada</h3><p class="muted">Rondas: ${d.practice.roundsNeeded} · errores: ${d.practice.errors} · completada: ${d.practice.completed} · repeticiones de la consigna: ${d.instruction.repeats}</p>`;
+        html += `<h3>Incidencias (${d.incidents.length})</h3><p class="muted">${d.incidents.map((i) => i.type).join(", ") || "ninguna"}</p>`;
+        html += `<h3>JSON completo</h3><button id="dl">Descargar JSON</button><pre>${JSON.stringify(d, null, 1).replace(/</g, "&lt;")}</pre>`;
+        document.getElementById("out").innerHTML = html;
+        document.getElementById("dl").onclick = () => {
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: "application/json" }));
+            a.download = `TG-01_${d.sessionId || "sesion"}_${d.state}.json`; a.click();
+        };
+    });
+</script>
+</body>
+</html>
