@@ -490,6 +490,31 @@ function playTransition() {
         setTimeout(showSpace, 300);
     });
 }
+function showLab() {
+    $("bgSpace").classList.add("hidden"); $("shipFront").classList.add("hidden");
+    zoneEl.classList.add("hidden");
+    $("spaceBubble").classList.add("hidden", "off");
+    $("bgLab").classList.remove("hidden");
+    $("labText").classList.remove("hidden", "off");
+    $("kud").className = "layer lab";
+}
+function playReturnTransition() {
+    return new Promise((resolve) => {
+        if (SKIP_VIDEO) { addIncident("transition_back_skipped", { reason: "url_param" }); resolve(); return; }
+        const v = $("transitionBack");
+        let done = false;
+        const finish = (why) => { if (done) return; done = true; if (why) addIncident("transition_back_skipped", { reason: why });
+            v.classList.add("fade"); v.style.opacity = "0"; setTimeout(() => { v.classList.add("hidden"); v.style.opacity = ""; }, 400); resolve(); };
+        v.classList.remove("hidden");
+        v.addEventListener("ended", () => finish(null), { once: true });
+        v.addEventListener("error", () => finish("video_error"), { once: true });
+        setTimeout(() => finish("timeout"), 15000);
+        v.currentTime = 0;
+        v.play().catch(() => finish("autoplay_blocked"));
+        // el laboratorio queda listo debajo para que el último cuadro empalme sin salto
+        setTimeout(showLab, 300);
+    });
+}
 async function countdown() {
     const el = $("countdown"); el.classList.remove("hidden");
     for (const n of ["3", "2", "1"]) { el.textContent = n; await sleep(800); }
@@ -545,8 +570,13 @@ async function main() {
     sessionData.summary = computeIndicators(sessionData.events, sessionData.emptyResponses, CONFIG);
     $("progress").classList.add("hidden");
     if (music) { try { music.pause(); } catch (e) {} }
-    say("¡Misión completada! Gracias por explorar conmigo.", 2600);
-    submit(false);
+    submit(false);                       // los datos se envían antes de la transición
+    say("¡Misión completada!", 2000);
+    await sleep(2400);
+    hideBubble();
+    await playReturnTransition();
+    showLab();
+    say("¡Gracias por explorar el espacio conmigo!", 2600, "lab");
 }
 
 /* ---------------------------------------------------------------------
